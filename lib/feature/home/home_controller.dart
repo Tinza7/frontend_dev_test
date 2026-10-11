@@ -23,6 +23,8 @@ class HomeController extends GetxController {
   int _page = 1;
   int _totalPages = 1;
   bool _isFetchingMore = false;
+  bool _isRefreshing = false;
+  int _dealsRequestGeneration = 0;
 
   bool get hasMore => _page < _totalPages;
 
@@ -56,31 +58,54 @@ class HomeController extends GetxController {
   }
 
   Future<void> refreshDeals() async {
-    _page = 1;
-    final res = await dealRepo.fetchDeals(page: 1);
-    _totalPages = res.totalPages;
-    deals.assignAll(res.items);
-    refreshController.refreshCompleted();
+    final generation = ++_dealsRequestGeneration;
+    _isRefreshing = true;
+    var succeeded = false;
+    try {
+      final res = await dealRepo.fetchDeals(page: 1);
+      if (generation != _dealsRequestGeneration) return;
+      _page = res.page;
+      _totalPages = res.totalPages;
+      deals.assignAll(res.items);
+      succeeded = true;
+    } catch (e) {
+      LogService.error('refresh deals failed', e);
+    } finally {
+      if (generation == _dealsRequestGeneration) {
+        _isRefreshing = false;
+        if (succeeded) {
+          refreshController.refreshCompleted();
+        } else {
+          refreshController.refreshFailed();
+        }
+      }
+    }
   }
 
   Future<void> loadMore() async {
-    if (_isFetchingMore) return;
+    if (_isFetchingMore || _isRefreshing) return;
     if (!hasMore) {
       refreshController.loadNoData();
       return;
     }
     _isFetchingMore = true;
-    _page++;
+    final generation = _dealsRequestGeneration;
+    final nextPage = _page + 1;
     try {
-      final res = await dealRepo.fetchDeals(page: _page);
-      _totalPages = res.totalPages;
-      deals.addAll(res.items);
+      final res = await dealRepo.fetchDeals(page: nextPage);
+      if (generation == _dealsRequestGeneration) {
+        _page = res.page;
+        _totalPages = res.totalPages;
+        deals.addAll(res.items);
+      }
     } catch (e) {
       LogService.error('loadMore failed', e);
-      _page--;
+    } finally {
+      _isFetchingMore = false;
+      if (!isClosed) {
+        refreshController.loadComplete();
+      }
     }
-    _isFetchingMore = false;
-    refreshController.loadComplete();
   }
 
   void scrollToTop() {
@@ -90,6 +115,7 @@ class HomeController extends GetxController {
 
   @override
   void onClose() {
+    _dealsRequestGeneration++;
     scrollController.dispose();
     refreshController.dispose();
     super.onClose();
