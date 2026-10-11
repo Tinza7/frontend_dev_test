@@ -4,17 +4,20 @@ import '../../model/deal_model.dart';
 import '../../repository/deal_repo.dart';
 import '../../service/analytics_service.dart';
 import '../../service/cart_service.dart';
+import '../../service/flash_sale_service.dart';
 import '../../util/log_service.dart';
 
 class DealDetailsController extends GetxController {
   final DealRepo dealRepo;
   final CartService cartService;
   final AnalyticsService analytics;
+  final FlashSaleService flashSaleService;
 
   DealDetailsController({
     required this.dealRepo,
     required this.cartService,
     required this.analytics,
+    required this.flashSaleService,
   });
 
   final deal = Rxn<DealModel>();
@@ -23,6 +26,8 @@ class DealDetailsController extends GetxController {
   final isLoading = false.obs;
   final errorMessage = RxnString();
   bool get canRetry => _requestedDealId != null;
+
+  bool isDealExpired(DealModel value) => flashSaleService.isExpired(value);
 
   Worker? _cartItemCountWorker;
   int? _requestedDealId;
@@ -75,6 +80,9 @@ class DealDetailsController extends GetxController {
   void _setDeal(DealModel value) {
     deal.value = value;
     _quantityLeft.value = value.quantityLeft;
+    if (value.isFlashSale) {
+      flashSaleService.track(value);
+    }
     analytics.logEvent('deal_details_view', {
       'deal_id': value.id,
       'source': _source,
@@ -102,6 +110,14 @@ class DealDetailsController extends GetxController {
   void addToCart() {
     final currentDeal = deal.value;
     if (currentDeal == null || isLoading.value) return;
+    if (flashSaleService.isExpired(currentDeal)) {
+      Get.snackbar(
+        'Flash sale ended',
+        'This deal can no longer be added to your bag.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
     cartService.add(currentDeal);
     Get.snackbar(
       'Added to bag',

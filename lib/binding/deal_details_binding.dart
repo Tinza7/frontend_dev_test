@@ -9,6 +9,7 @@ class DealDetailsBinding extends Bindings {
           dealRepo: Get.find(),
           cartService: Get.find(),
           analytics: Get.find(),
+          flashSaleService: Get.find(),
         ));
   }
 }
