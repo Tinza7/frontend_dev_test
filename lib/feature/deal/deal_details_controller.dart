@@ -17,38 +17,95 @@ class DealDetailsController extends GetxController {
     required this.analytics,
   });
 
-  late final DealModel deal;
-
+  final deal = Rxn<DealModel>();
   final _quantityLeft = RxnInt();
   int? get quantityLeft => _quantityLeft.value;
+  final isLoading = false.obs;
+  final errorMessage = RxnString();
+  bool get canRetry => _requestedDealId != null;
+
   Worker? _cartItemCountWorker;
+  int? _requestedDealId;
+  int _loadGeneration = 0;
+  String _source = 'unknown';
 
   @override
   void onInit() {
     super.onInit();
-    deal = Get.arguments as DealModel;
-    _quantityLeft.value = deal.quantityLeft;
+    _source = Get.parameters['source'] ?? 'unknown';
+    final argument = Get.arguments;
+    if (argument is DealModel) {
+      _setDeal(argument);
+      return;
+    }
+
+    final dealId = int.tryParse(Get.parameters['id'] ?? '');
+    if (dealId == null || dealId <= 0) {
+      errorMessage.value = 'This deal link is invalid.';
+      return;
+    }
+    loadDealById(dealId);
+  }
+
+  Future<void> loadDealById(int id) async {
+    _requestedDealId = id;
+    final generation = ++_loadGeneration;
+    isLoading.value = true;
+    errorMessage.value = null;
+    try {
+      final fetchedDeal = await dealRepo.fetchById(id);
+      if (generation != _loadGeneration || isClosed) return;
+      _setDeal(fetchedDeal);
+    } catch (e) {
+      if (generation != _loadGeneration || isClosed) return;
+      LogService.error('load deal details failed', e);
+      errorMessage.value = 'Could not load this deal. Please try again.';
+    } finally {
+      if (generation == _loadGeneration && !isClosed) {
+        isLoading.value = false;
+      }
+    }
+  }
+
+  void retryLoad() {
+    final id = _requestedDealId;
+    if (id != null) loadDealById(id);
+  }
+
+  void _setDeal(DealModel value) {
+    deal.value = value;
+    _quantityLeft.value = value.quantityLeft;
     analytics.logEvent('deal_details_view', {
-      'deal_id': deal.id,
-      'source': Get.parameters['source'] ?? 'unknown',
+      'deal_id': value.id,
+      'source': _source,
     });
-    // Whenever the cart changes, re-check this deal's remaining stock so the
-    // details screen never shows stale availability.
-    _cartItemCountWorker =
+
+    // The listener belongs to this page's controller and is released in onClose.
+    _cartItemCountWorker ??=
         ever(cartService.itemCount, (_) => _recheckAvailability());
   }
 
   Future<void> _recheckAvailability() async {
-    LogService.log('re-checking availability for deal ${deal.id}');
-    final fresh = await dealRepo.fetchById(deal.id);
-    _quantityLeft.value = fresh.quantityLeft;
+    final currentDeal = deal.value;
+    if (currentDeal == null || isClosed) return;
+    LogService.log('re-checking availability for deal ${currentDeal.id}');
+    try {
+      final fresh = await dealRepo.fetchById(currentDeal.id);
+      if (!isClosed && deal.value?.id == currentDeal.id) {
+        _quantityLeft.value = fresh.quantityLeft;
+      }
+    } catch (e) {
+      LogService.error('re-check deal availability failed', e);
+    }
   }
 
   void addToCart() {
-    cartService.add(deal);
+    final currentDeal = deal.value;
+    if (currentDeal == null || isLoading.value) return;
+    cartService.add(currentDeal);
     Get.snackbar(
       'Added to bag',
-      '${deal.name} — pick up ${deal.pickupWindow.label}',
+      '${currentDeal.name} — pick up ${currentDeal.pickupWindow.label}',
       snackPosition: SnackPosition.BOTTOM,
       duration: const Duration(seconds: 2),
     );
@@ -56,6 +113,7 @@ class DealDetailsController extends GetxController {
 
   @override
   void onClose() {
+    _loadGeneration++;
     _cartItemCountWorker?.dispose();
     super.onClose();
   }

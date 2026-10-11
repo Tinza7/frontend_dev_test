@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../app_config.dart';
+import '../../model/deal_model.dart';
 import '../shared_widget/the_network_image.dart';
 import 'deal_details_controller.dart';
 
@@ -10,7 +11,37 @@ class DealDetailsScreen extends GetView<DealDetailsController> {
 
   @override
   Widget build(BuildContext context) {
-    final deal = controller.deal;
+    return Obx(() {
+      final deal = controller.deal.value;
+      if (controller.isLoading.value) {
+        return Scaffold(
+          appBar: AppBar(),
+          body: const Center(child: CircularProgressIndicator()),
+        );
+      }
+      if (deal == null) {
+        return Scaffold(
+          appBar: AppBar(),
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(controller.errorMessage.value ?? 'Deal unavailable'),
+                if (controller.canRetry)
+                  TextButton(
+                    onPressed: controller.retryLoad,
+                    child: const Text('Try again'),
+                  ),
+              ],
+            ),
+          ),
+        );
+      }
+      return _buildDealScreen(context, deal);
+    });
+  }
+
+  Widget _buildDealScreen(BuildContext context, DealModel deal) {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
@@ -56,7 +87,8 @@ class DealDetailsScreen extends GetView<DealDetailsController> {
                       Obx(() => Chip(
                             avatar: const Icon(Icons.inventory_2_outlined,
                                 size: 16),
-                            label: Text('${controller.quantityLeft ?? '-'} left'),
+                            label:
+                                Text('${controller.quantityLeft ?? '-'} left'),
                           )),
                     ],
                   ),
