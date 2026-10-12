@@ -10,10 +10,11 @@ class FlashSaleService extends GetxService {
 
   final CartService cartService;
 
-  final expiredDealIds = <int>{}.obs;
+  final expiredDealIds = <int>{};
   final Map<int, DateTime> _endsAtByDeal = {};
   final Map<int, String> _namesByDeal = {};
   final Map<int, RxInt> _remainingSecondsByDeal = {};
+  final Map<int, RxBool> _expiredByDeal = {};
   final RxInt _expiredCountdown = 0.obs;
   Timer? _timer;
 
@@ -28,7 +29,7 @@ class FlashSaleService extends GetxService {
     if (endsAt == null) {
       throw ArgumentError.value(deal.id, 'deal', 'Deal is not a flash sale');
     }
-    if (expiredDealIds.contains(deal.id)) return _expiredCountdown;
+    if (_isExpired(deal.id)) return _expiredCountdown;
 
     _endsAtByDeal[deal.id] = endsAt;
     _namesByDeal[deal.id] = deal.name;
@@ -44,9 +45,18 @@ class FlashSaleService extends GetxService {
 
   bool isExpired(DealModel deal) {
     final endsAt = deal.flashSaleEndsAt;
-    return endsAt != null &&
-        (!endsAt.isAfter(DateTime.now()) ||
-            expiredDealIds.contains(deal.id));
+    if (endsAt == null) return false;
+
+    final alreadyExpired = _isExpired(deal.id);
+    return alreadyExpired || !endsAt.isAfter(DateTime.now());
+  }
+
+  bool _isExpired(int dealId) {
+    final expired = _expiredByDeal.putIfAbsent(
+      dealId,
+      () => expiredDealIds.contains(dealId).obs,
+    );
+    return expired.value;
   }
 
   static int _secondsUntil(DateTime end) {
@@ -84,6 +94,9 @@ class FlashSaleService extends GetxService {
   void _expire(int dealId) {
     if (expiredDealIds.contains(dealId)) return;
     expiredDealIds.add(dealId);
+    _expiredByDeal
+        .putIfAbsent(dealId, () => false.obs)
+        .value = true;
 
     final name = _namesByDeal[dealId] ?? 'Flash-sale deal';
     final wasInBag = cartService.items.any((item) => item.deal.id == dealId);
